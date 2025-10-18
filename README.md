@@ -16,6 +16,27 @@ The application allows you to:
 
 ---
 
+## 🖼️ Application Preview
+
+Below is a screenshot of the main interface running locally:
+
+<p align="center">
+  <img src="images/screenshot-main.png" alt="Streamlit App Screenshot" width="850">
+</p>
+
+---
+
+## 🎨 PDF Example
+
+A visual overview of the PDF Report of the app:
+
+<p align="center">
+  <img src="images/screenshot-pdf-example.png" alt="Streamlit App Screenshot" width="850">
+</p>
+
+
+---
+
 ## 🧰 Technologies Used
 
 | Category | Tools / Libraries |
