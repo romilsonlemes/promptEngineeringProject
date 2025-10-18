@@ -21,7 +21,7 @@ The application allows you to:
 Below is a screenshot of the main interface running locally:
 
 <p align="center">
-  <img src="images/screenshot-main.png" alt="Streamlit App Screenshot" width="850">
+  <img src="images/screenshot-main-page.png" alt="Streamlit App Screenshot" width="850">
 </p>
 
 ---
