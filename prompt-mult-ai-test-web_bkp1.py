@@ -1,4 +1,4 @@
-# prompt-mult-ai-test-web.py — Multi-model + (texto + imagens) + PDF + tabela de tokens + Rodapé OpenAI
+# prompt-mult-ai-test-web.py
 import os
 import sys
 import platform
@@ -7,13 +7,12 @@ import traceback
 import io
 import base64
 from pathlib import Path
-from typing import List, Optional
 
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
-# Multimodal messages (text + images) in LangChain:
+# Multimodais messages (text + images) in LangChain:
 try:
     from langchain_core.messages import HumanMessage
 except Exception:  # fallback for old versions
@@ -21,7 +20,7 @@ except Exception:  # fallback for old versions
 
 import pandas as pd  # para as tabelas
 
-# ================= Private Functions - Romilson Lemes =================
+# Private Functions - Romilson Lemes
 os.system("cls")
 from functions.readfiles import load_llm_models_yaml as ldllm_yaml
 llmmodel = ["load_llm_models_yaml"]
@@ -31,7 +30,6 @@ from functions.utils import sort_dictionary as stdic
 llmutil = ["sort_dictionary"]
 print(f"📦 Successfully initialized function  {llmutil}")
 
-# ================= Setup =================
 load_dotenv(find_dotenv())
 st.set_page_config(page_title="LLM - Prompt-mult-ai-test-web (Streamlit)", page_icon="🤖", layout="wide")
 
@@ -42,7 +40,7 @@ PDF_TITLE  = APP_TITLE
 st.sidebar.header("PDF Settings")
 pdf_title_font_size = st.sidebar.slider("Title font size (PDF)", min_value=10, max_value=25, value=15, step=1)
 
-# ================= Utils (logo, imagens, multimodal, tokens) =================
+# ======= Utils =======
 def _read_logo_base64() -> str | None:
     """Searches for the logo in common paths and returns its base64 representation, if it exists."""
     here = Path(__file__).parent.resolve()
@@ -62,46 +60,9 @@ def _read_logo_base64() -> str | None:
     st.info("⚠️ Logo not found. Tried paths:<br>" + "<br>".join(tried), icon="⚠️")
     return None
 
-def _to_image_data_url(uploaded_file) -> Optional[str]:
-    """Converte um arquivo carregado em data:image/...;base64,..."""
-    if uploaded_file is None:
-        return None
-    raw = uploaded_file.read()
-    if not raw:
-        return None
-    mime = uploaded_file.type or "image/png"
-    if not mime.startswith("image/"):
-        return None
-    b64 = base64.b64encode(raw).decode("utf-8")
-    return f"data:{mime};base64,{b64}"
-
-def _build_mm_content(prompt_text: str, image_data_urls: List[str], image_http_urls: List[str]):
-    """Constrói o conteúdo multimodal (texto + imagens)"""
-    blocks = []
-    if prompt_text.strip():
-        blocks.append({"type": "text", "text": prompt_text.strip()})
-    for url in image_data_urls:
-        blocks.append({"type": "image_url", "image_url": {"url": url}})
-    for url in image_http_urls:
-        u = url.strip()
-        if u:
-            blocks.append({"type": "image_url", "image_url": {"url": u}})
-    return blocks
-
-def _extract_token_usage(response):
-    input_toks = output_toks = total_toks = None
-    md = getattr(response, "response_metadata", {}) or {}
-    usage = md.get("token_usage") or md.get("usage") or {}
-    input_toks  = usage.get("prompt_tokens")     or usage.get("input_tokens")
-    output_toks = usage.get("completion_tokens") or usage.get("output_tokens")
-    total_toks  = usage.get("total_tokens")
-    if total_toks is None and (input_toks and output_toks):
-        total_toks = input_toks + output_toks
-    return input_toks, output_toks, total_toks
-
 logo_b64 = _read_logo_base64()
 
-# ================= CSS (global) =================
+# ======= CSS (global) =======
 DARK_BLUE = "#0b3d91"  # azul escuro para tabelas
 st.markdown(
     f"""
@@ -113,20 +74,18 @@ st.markdown(
       .blink-error{{ animation:blinker 1s linear infinite; color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; display:inline-block; font-weight:700; letter-spacing:.3px; }}
       @keyframes blinker {{ 50% {{ opacity:0; }} }}
       .prompt-label,.model-label{{ font-size:14pt; color:#c00000; font-weight:700; margin:6px 0 4px 0; }}
-      .stSelectbox *{{ font-size:14pt !important; }} .stTextInput input, .stTextArea textarea{{ font-size:14pt !important; }}
+      .stSelectbox *{{ font-size:14pt !important; }} .stTextInput input{{ font-size:14pt !important; }}
       .blue-section{{ color:#0b64d8; margin:12px 0 6px 0; font-weight:700; }}
 
       /* Azul-escuro em todas as tabelas data_editor (modelos e token usage) */
       [data-testid="stDataEditor"] * {{ color: {DARK_BLUE} !important; }}
       [data-testid="stDataEditor"] thead * {{ font-weight: 700 !important; }}
-
-      .thumb{{ border:1px solid #d0d7de; border-radius:8px; padding:4px; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ================= Header (logo + título) =================
+# ======= Header (logo + título) =======
 if logo_b64:
     st.markdown(
         f"""
@@ -150,7 +109,7 @@ else:
 st.title("🤖 Test multi models -  LLM (Streamlit)")
 st.caption(f"System: {platform.system()} | Python: {platform.python_version()} | OS name: {os.name}")
 
-# ================= State =================
+# ======= State =======
 st.session_state.setdefault("exec_log", "")
 st.session_state.setdefault("current_output", "")
 st.session_state.setdefault("is_running", False)
@@ -158,12 +117,12 @@ st.session_state.setdefault("last_error", "")
 st.session_state.setdefault("log_pdf_bytes", b"")
 st.session_state.setdefault("usage_rows", [])
 
-# ================= Inputs (texto) =================
-default_q = "Analyze the image(s) and answer: what is this and what key details stand out?"
+# ======= Inputs =======
+default_q = "Calculate the result of the following expression: ((((45 × 9) / 3) × 1898) / 2.85)"
 st.markdown('<div class="prompt-label">Enter your question (prompt)</div>', unsafe_allow_html=True)
 question = st.text_input("", value=default_q)
 
-# ================= Lê lista de modelos do YAML (mantido) =================
+# Read List of Models (from YAML)
 yaml_path = "./config/llm_models.yaml"
 flat_models = ldllm_yaml(yaml_path, flatten=True)
 for info in flat_models:
@@ -172,10 +131,10 @@ for info in flat_models:
 
 print("*"*50); print(f"flat_models:\n {flat_models}"); print("*"*50)
 
-# Ordena por Platform desc (mantido)
+# Ordena por Platform desc (como já fazia)
 results1 = stdic(flat_models, "desc", "Platform")
 
-# ================= Tabela multi-seleção de modelos (mantido) =================
+# ======= TABELA DE MULTI-SELEÇÃO (20% largura + 5 linhas com scroll) =======
 st.markdown('<div class="model-label">LLM Models (multi-select)</div>', unsafe_allow_html=True)
 col_models, col_rest = st.columns([0.2, 0.8])
 
@@ -204,35 +163,7 @@ with col_models:
 selected_rows = edited_df[edited_df["Select"]]
 selected_models = [{"Model": m, "Platform": p} for m, p in zip(selected_rows["Model"], selected_rows["Platform"])]
 
-# ================= (NOVO) Entrada de IMAGENS — uploads + URLs =================
-# Observação: inspirado no 1-zero-shot-test-web_v2.py
-st.markdown('<h3 class="blue-section">Images:</h3>', unsafe_allow_html=True)
-up_files = st.file_uploader(
-    "Upload 1–6 images (PNG/JPEG/WebP). They will be sent to the LLM.",
-    type=["png", "jpg", "jpeg", "webp"],
-    accept_multiple_files=True
-)
-
-url_text = st.text_area(
-    "Optional: paste image URLs (one per line).",
-    height=90,
-    placeholder="https://example.com/image1.png\nhttps://example.com/image2.jpg"
-)
-
-# Pré-visualização de miniaturas
-if up_files:
-    cols = st.columns(min(3, len(up_files)))
-    for i, uf in enumerate(up_files):
-        with cols[i % len(cols)]:
-            st.image(uf, use_column_width=True, caption=f"Upload {i+1}", output_format="PNG")
-
-# Conjunto de modelos com visão (pode ajustar conforme seu catálogo)
-vision_capable = {
-    "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
-    "gpt-5", "gpt-5-mini", "o3", "o3-mini"
-}
-
-# ================= Botões =================
+# Botões
 col1, col2, col3 = st.columns([1, 1, 1], vertical_alignment="bottom")
 run_clicked   = col1.button("Run", disabled=st.session_state.is_running)
 clear_clicked = col2.button("Clear Log")
@@ -245,7 +176,7 @@ dl_txt_placeholder.download_button(
     disabled=not bool(st.session_state.exec_log),
 )
 
-# ================= Actions =================
+# ======= Actions =======
 if clear_clicked:
     st.session_state["exec_log"] = ""
     st.session_state["current_output"] = ""
@@ -254,6 +185,17 @@ if clear_clicked:
     st.session_state["usage_rows"] = []
     st.toast("Log cleared!", icon="🧹")
 
+def _extract_token_usage(response):
+    input_toks = output_toks = total_toks = None
+    md = getattr(response, "response_metadata", {}) or {}
+    usage = md.get("token_usage") or md.get("usage") or {}
+    input_toks  = usage.get("prompt_tokens")     or usage.get("input_tokens")
+    output_toks = usage.get("completion_tokens") or usage.get("output_tokens")
+    total_toks  = usage.get("total_tokens")
+    if total_toks is None and (input_toks and output_toks):
+        total_toks = input_toks + output_toks
+    return input_toks, output_toks, total_toks
+
 if run_clicked:
     if not question.strip():
         st.warning("Please enter a prompt.")
@@ -261,41 +203,14 @@ if run_clicked:
         st.warning("Please select at least one model in the table.")
     else:
         st.session_state.is_running = True
-
-        # Pré-prepara imagens/URLs uma vez (serão usadas apenas por modelos vision)
-        data_urls_master: List[str] = []
-        if up_files:
-            for uf in up_files[:6]:
-                du = _to_image_data_url(uf)
-                if du:
-                    data_urls_master.append(du)
-
-        http_urls_master: List[str] = []
-        if url_text.strip():
-            http_urls_master = [ln.strip() for ln in url_text.strip().splitlines() if ln.strip()]
-
         for item in selected_models:
             model_id = item["Model"]
             label_for_ui = f"{item['Model']} | {item['Platform']}"
-
-            # Decide se vai enviar multimodal (texto + imagens) ou apenas texto
-            send_images = (model_id in vision_capable) and (data_urls_master or http_urls_master)
-            if (not (model_id in vision_capable)) and (data_urls_master or http_urls_master):
-                st.info(f"ℹ️ {label_for_ui} pode não suportar visão. Somente o texto será enviado.", icon="ℹ️")
-
-            if send_images:
-                content_blocks = _build_mm_content(question, data_urls_master, http_urls_master)
-                messages = [HumanMessage(content=content_blocks)]
-                payload_for_log = f"{question}\n\n[Attached images: {len(data_urls_master)+len(http_urls_master)}]"
-            else:
-                messages = [HumanMessage(content=question)]
-                payload_for_log = question
-
             with st.status(f"Querying the LLM ({label_for_ui})...", expanded=False):
                 started = datetime.now()
                 try:
-                    llm = ChatOpenAI(model=model_id, max_retries=0, timeout=60)
-                    response = llm.invoke(messages)
+                    llm = ChatOpenAI(model=model_id, max_retries=0, timeout=30)
+                    response = llm.invoke(question)
                     content = getattr(response, "content", str(response))
                     st.session_state["last_error"] = ""; ok = True
                 except Exception as e:
@@ -305,19 +220,17 @@ if run_clicked:
                 finished = datetime.now()
                 duration_s = (finished - started).total_seconds()
 
-            # Atualiza saída e log
             st.session_state["current_output"] = content
             sep = "\n" + ("-" * 80) + "\n"
             block = (
                 f"Timestamp: {started.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 f"Model: {label_for_ui}\n"
-                f"Prompt:\n{payload_for_log}\n\n"
+                f"Prompt:\n{question}\n\n"
                 f"Response:\n{content}\n"
                 f"Duration: {duration_s:.2f}s"
             )
             st.session_state["exec_log"] += (sep if st.session_state["exec_log"] else "") + block
 
-            # Tokens
             in_tok = out_tok = tot_tok = None
             if response is not None:
                 in_tok, out_tok, tot_tok = _extract_token_usage(response)
@@ -338,7 +251,6 @@ if run_clicked:
                 st.success(f"✅ Execution finished — result received from {label_for_ui}."); st.toast(f"Result received ({label_for_ui})", icon="✅")
             else:
                 st.error(f"An error occurred with {label_for_ui}. See details in the footer."); st.toast(f"Execution error ({label_for_ui})", icon="⚠️")
-
         st.session_state.is_running = False
         dl_txt_placeholder.download_button(
             label="⬇️ Download Log (.txt)",
@@ -348,18 +260,21 @@ if run_clicked:
             disabled=False,
         )
 
-# ================= LLM Response (blue) =================
+# ======= LLM Response (blue) =======
 st.markdown('<h3 class="blue-section">LLM Response</h3>', unsafe_allow_html=True)
 st.text_area("Output", key="current_output", height=220, help="Only the latest run's response.")
 
-# ================= Token Usage (50% largura + visible rows = 5 com scroll) =================
+# ======= Token Usage (50% largura + visible rows = 5 com scroll) =======
 st.markdown('<h3 class="blue-section">Token Usage:</h3>', unsafe_allow_html=True)
 df_usage = pd.DataFrame(st.session_state["usage_rows"])
 
 if df_usage.empty:
     st.info("No records yet")
 else:
+    # Coluna esquerda ocupa 50% da página:
     col_usage, col_gap = st.columns([0.5, 0.5])
+
+    # Altura calculada para exibir exatamente ~5 linhas visíveis (com cabeçalho) e ativar scroll
     VISIBLE_ROWS_USAGE = 5
     ROW_PX_USAGE, HEADER_PX_USAGE, PADDING_PX_USAGE = 36, 40, 28
     usage_editor_height = HEADER_PX_USAGE + VISIBLE_ROWS_USAGE * ROW_PX_USAGE + PADDING_PX_USAGE  # ~248px
@@ -374,18 +289,19 @@ else:
             "Time (s)": st.column_config.NumberColumn("Time (s)", help="Execution time in seconds", format="%.2f"),
         }
         column_order = ["No.", "Model", "Input tokens", "Output tokens", "Total tokens", "Time (s)"]
+
         st.data_editor(
-            df_usage,
-            hide_index=True,
-            use_container_width=True,
-            height=usage_editor_height,
+            df_usage,                     # mostra TODOS os registros,
+            hide_index=True,              # porém só 5 ficam visíveis
+            use_container_width=True,     # ocupa 100% da coluna (50% da página)
+            height=usage_editor_height,   # <<< limite visual: ~5 linhas → scroll para ver o resto
             column_config=col_config,
             column_order=column_order,
-            disabled=column_order,
+            disabled=column_order,        # impede edição; mantém ordenação via menu do cabeçalho
             key="usage_editor",
         )
 
-# ================= Execution Log =================
+# ======= Execution Log =======
 st.subheader("Execution Log")
 st.text_area(
     "History",
@@ -395,7 +311,7 @@ st.text_area(
     disabled=True,
 )
 
-# ================= Log PDF (mantido) =================
+# ======= Log PDF =======
 st.markdown("### Export Log as PDF")
 
 def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE, title_font_size: int = 20) -> bytes:
@@ -499,7 +415,7 @@ if gen_pdf_clicked:
         st.session_state["exec_log"],
         logo_b64,
         PDF_TITLE,
-        title_font_size=pdf_title_font_size
+        title_font_size=pdf_title_font_size  # usa o valor escolhido na sidebar
     )
     st.toast(f"PDF generated (title font size = {pdf_title_font_size}pt).", icon="📄")
 
@@ -527,7 +443,7 @@ if st.session_state["log_pdf_bytes"]:
             </script>
         """, height=0)
 
-# ================= Errors footer =================
+# ======= Errors footer =======
 st.markdown("---")
 if st.session_state["last_error"]:
     st.markdown('<span class="blink-error">⚠️ EXECUTION ERROR</span>', unsafe_allow_html=True)
@@ -539,41 +455,3 @@ if st.session_state["last_error"]:
         help="Error returned by the LLM call.",
         disabled=True,
     )
-
-# ===================== OpenAI Footer (adicionado a partir de 1-zero-shot-test-web.py) =====================
-st.markdown(
-    """
-    <style>
-        .footer-openai {
-            margin-top: 25px;
-            text-align: center;
-        }
-        .footer-openai a img {
-            width: 60px;
-            height: auto;
-            opacity: 0.9;
-            transition: transform 0.2s ease, opacity 0.2s ease;
-        }
-        .footer-openai a img:hover {
-            transform: scale(1.1);
-            opacity: 1.0;
-        }
-        .footer-openai-text {
-            font-size: 11pt;
-            color: #666;
-            margin-top: 6px;
-        }
-    </style>
-
-    <div class="footer-openai">
-        <a href="https://platform.openai.com/settings/organization/usage" target="_blank" title="OpenAI Usage Dashboard">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/4/4d/OpenAI_Logo.svg" alt="OpenAI Logo">
-        </a>
-        <div class="footer-openai-text">
-            © 2025 Prompt Engineer Project — OpenAI Usage Dashboard<br>
-            Powered by Romilson Lemes — Using OpenAI API
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
