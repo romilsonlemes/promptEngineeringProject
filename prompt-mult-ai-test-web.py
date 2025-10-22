@@ -18,7 +18,7 @@ try:
 except Exception:  # fallback for old versions
     from langchain.schema import HumanMessage
 
-import pandas as pd  # <<< ADICIONADO para a tabela de seleção
+import pandas as pd  # para as tabelas
 
 # Private Functions - Romilson Lemes
 os.system("cls")
@@ -26,17 +26,19 @@ from functions.readfiles import load_llm_models_yaml as ldllm_yaml
 llmmodel = ["load_llm_models_yaml"]
 print(f"📦 Successfully initialized function  {llmmodel}")
 
-# sys.path.append(os.path.abspath(os.path.dirname("utils.py")))
 from functions.utils import sort_dictionary as stdic
 llmutil = ["sort_dictionary"]
 print(f"📦 Successfully initialized function  {llmutil}")
-# sort_dictionary(data, order="asc", key=None):
 
 load_dotenv(find_dotenv())
 st.set_page_config(page_title="LLM - Prompt-mult-ai-test-web (Streamlit)", page_icon="🤖", layout="wide")
 
 APP_TITLE = "Prompt Engineering Lab – Multi-AI Simulation"
 PDF_TITLE  = APP_TITLE
+
+# ================= Sidebar (PDF settings) =================
+st.sidebar.header("PDF Settings")
+pdf_title_font_size = st.sidebar.slider("Title font size (PDF)", min_value=10, max_value=25, value=15, step=1)
 
 # ======= Utils =======
 def _read_logo_base64() -> str | None:
@@ -61,61 +63,23 @@ def _read_logo_base64() -> str | None:
 logo_b64 = _read_logo_base64()
 
 # ======= CSS (global) =======
+DARK_BLUE = "#0b3d91"  # azul escuro para tabelas
 st.markdown(
-    """
+    f"""
     <style>
-      /* ===== Header (logo + title) ===== */
-      .header-wrap{
-        display:flex;
-        align-items:center;
-        gap:14px;
-        margin: 6px 0 4px 0;
-      }
-      .header-title{
-        color: #c00000;
-        font-size:36pt;
-        font-weight:700;
-        line-height:1.0;
-        margin: 0;
-        padding: 0;
-      }
-      .header-logo{
-        height: 150px;
-        width: auto;
-        display:block;
-      }
-      .page-divider{
-        border: 0;
-        height: 2px;
-        background: linear-gradient(to right, #c9d7e8, #7aa6d9, #c9d7e8);
-        margin: 8px 0 16px 0;
-      }
-      .blink-error {
-        animation: blinker 1s linear infinite;
-        color: #fff;
-        background: #d32f2f;
-        padding: 6px 10px;
-        border-radius: 8px;
-        display: inline-block;
-        font-weight: 700;
-        letter-spacing: .3px;
-      }
-      @keyframes blinker { 50% { opacity: 0; } }
+      .header-wrap{{ display:flex; align-items:center; gap:14px; margin:6px 0 4px 0; }}
+      .header-title{{ color:#c00000; font-size:36pt; font-weight:700; line-height:1.0; margin:0; padding:0; }}
+      .header-logo{{ height:150px; width:auto; display:block; }}
+      .page-divider{{ border:0; height:2px; background:linear-gradient(to right,#c9d7e8,#7aa6d9,#c9d7e8); margin:8px 0 16px 0; }}
+      .blink-error{{ animation:blinker 1s linear infinite; color:#fff; background:#d32f2f; padding:6px 10px; border-radius:8px; display:inline-block; font-weight:700; letter-spacing:.3px; }}
+      @keyframes blinker {{ 50% {{ opacity:0; }} }}
+      .prompt-label,.model-label{{ font-size:14pt; color:#c00000; font-weight:700; margin:6px 0 4px 0; }}
+      .stSelectbox *{{ font-size:14pt !important; }} .stTextInput input{{ font-size:14pt !important; }}
+      .blue-section{{ color:#0b64d8; margin:12px 0 6px 0; font-weight:700; }}
 
-      .prompt-label, .model-label {
-        font-size:14pt;
-        color:#c00000;
-        font-weight:700;
-        margin: 6px 0 4px 0;
-      }
-      .stSelectbox * { font-size:14pt !important; }
-      .stTextInput input { font-size:14pt !important; }
-
-      .blue-section {
-        color:#0b64d8;
-        margin: 12px 0 6px 0;
-        font-weight: 700;
-      }
+      /* Azul-escuro em todas as tabelas data_editor (modelos e token usage) */
+      [data-testid="stDataEditor"] * {{ color: {DARK_BLUE} !important; }}
+      [data-testid="stDataEditor"] thead * {{ font-weight: 700 !important; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -136,9 +100,7 @@ if logo_b64:
 else:
     st.markdown(
         f"""
-        <div class="header-wrap">
-          <div class="header-title">{APP_TITLE}</div>
-        </div>
+        <div class="header-wrap"><div class="header-title">{APP_TITLE}</div></div>
         <hr class="page-divider">
         """,
         unsafe_allow_html=True,
@@ -157,7 +119,6 @@ st.session_state.setdefault("usage_rows", [])
 
 # ======= Inputs =======
 default_q = "Calculate the result of the following expression: ((((45 × 9) / 3) × 1898) / 2.85)"
-
 st.markdown('<div class="prompt-label">Enter your question (prompt)</div>', unsafe_allow_html=True)
 question = st.text_input("", value=default_q)
 
@@ -168,36 +129,37 @@ for info in flat_models:
     print(f"Model Name......: {info['Model']:20} - {info['Platform']}")
     print(f"Platform_API_KEY: {info['Platform_API_KEY']}\n")
 
-print("*"*50)
-print(f"flat_models:\n {flat_models}")
-print("*"*50)
+print("*"*50); print(f"flat_models:\n {flat_models}"); print("*"*50)
 
 # Ordena por Platform desc (como já fazia)
 results1 = stdic(flat_models, "desc", "Platform")
 
-# ======= NOVO: TABELA DE MULTI-SELEÇÃO (Model | Platform) =======
+# ======= TABELA DE MULTI-SELEÇÃO (20% largura + 5 linhas com scroll) =======
 st.markdown('<div class="model-label">LLM Models (multi-select)</div>', unsafe_allow_html=True)
+col_models, col_rest = st.columns([0.2, 0.8])
 
-# DataFrame apenas com as duas colunas solicitadas
 df_models = pd.DataFrame([{"Model": r["Model"], "Platform": r["Platform"]} for r in results1])
-
-# Adiciona coluna de seleção booleana (checkbox)
 df_models.insert(0, "Select", False)
 
-edited_df = st.data_editor(
-    df_models,
-    hide_index=True,
-    use_container_width=True,
-    column_config={
-        "Select": st.column_config.CheckboxColumn("Select", help="Selecione os modelos para executar"),
-        "Model": st.column_config.TextColumn("Model", help="Nome do modelo"),
-        "Platform": st.column_config.TextColumn("Platform", help="Plataforma"),
-    },
-    disabled=["Model", "Platform"],  # impede edição de texto; só marca/desmarca
-    key="models_editor"
-)
+VISIBLE_ROWS = 5
+ROW_PX, HEADER_PX, PADDING_PX = 36, 40, 28
+models_editor_height = HEADER_PX + VISIBLE_ROWS * ROW_PX + PADDING_PX  # ~248px
 
-# Extrai os modelos selecionados
+with col_models:
+    edited_df = st.data_editor(
+        df_models,
+        hide_index=True,
+        use_container_width=True,
+        height=models_editor_height,
+        column_config={
+            "Select": st.column_config.CheckboxColumn("Select", help="Selecione os modelos para executar", width="small"),
+            "Model": st.column_config.TextColumn("Model", help="Nome do modelo", width="medium"),
+            "Platform": st.column_config.TextColumn("Platform", help="Plataforma", width="medium"),
+        },
+        disabled=["Model", "Platform"],
+        key="models_editor"
+    )
+
 selected_rows = edited_df[edited_df["Select"]]
 selected_models = [{"Model": m, "Platform": p} for m, p in zip(selected_rows["Model"], selected_rows["Platform"])]
 
@@ -205,7 +167,6 @@ selected_models = [{"Model": m, "Platform": p} for m, p in zip(selected_rows["Mo
 col1, col2, col3 = st.columns([1, 1, 1], vertical_alignment="bottom")
 run_clicked   = col1.button("Run", disabled=st.session_state.is_running)
 clear_clicked = col2.button("Clear Log")
-
 dl_txt_placeholder = col3.empty()
 dl_txt_placeholder.download_button(
     label="⬇️ Download Log (.txt)",
@@ -225,15 +186,12 @@ if clear_clicked:
     st.toast("Log cleared!", icon="🧹")
 
 def _extract_token_usage(response):
-    """Extract token counts from LangChain/OpenAI response metadata."""
     input_toks = output_toks = total_toks = None
     md = getattr(response, "response_metadata", {}) or {}
     usage = md.get("token_usage") or md.get("usage") or {}
-
     input_toks  = usage.get("prompt_tokens")     or usage.get("input_tokens")
     output_toks = usage.get("completion_tokens") or usage.get("output_tokens")
     total_toks  = usage.get("total_tokens")
-
     if total_toks is None and (input_toks and output_toks):
         total_toks = input_toks + output_toks
     return input_toks, output_toks, total_toks
@@ -245,32 +203,24 @@ if run_clicked:
         st.warning("Please select at least one model in the table.")
     else:
         st.session_state.is_running = True
-
-        # Executa para cada modelo selecionado
         for item in selected_models:
-            model_id = item["Model"]           # nome do modelo que vai para a API
-            label_for_ui = f"{item['Model']} | {item['Platform']}"  # exibição no status/log
-
+            model_id = item["Model"]
+            label_for_ui = f"{item['Model']} | {item['Platform']}"
             with st.status(f"Querying the LLM ({label_for_ui})...", expanded=False):
                 started = datetime.now()
                 try:
                     llm = ChatOpenAI(model=model_id, max_retries=0, timeout=30)
                     response = llm.invoke(question)
                     content = getattr(response, "content", str(response))
-                    st.session_state["last_error"] = ""
-                    ok = True
+                    st.session_state["last_error"] = ""; ok = True
                 except Exception as e:
                     response = None
                     content = f"[ERROR] {''.join(traceback.format_exception_only(type(e), e)).strip()}"
-                    st.session_state["last_error"] = content
-                    ok = False
+                    st.session_state["last_error"] = content; ok = False
                 finished = datetime.now()
                 duration_s = (finished - started).total_seconds()
 
-            # Atualiza a área de saída (última resposta da rodada)
             st.session_state["current_output"] = content
-
-            # Log
             sep = "\n" + ("-" * 80) + "\n"
             block = (
                 f"Timestamp: {started.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -281,8 +231,7 @@ if run_clicked:
             )
             st.session_state["exec_log"] += (sep if st.session_state["exec_log"] else "") + block
 
-            # Tokens
-            in_tok, out_tok, tot_tok = (None, None, None)
+            in_tok = out_tok = tot_tok = None
             if response is not None:
                 in_tok, out_tok, tot_tok = _extract_token_usage(response)
 
@@ -292,23 +241,17 @@ if run_clicked:
                 "Model": label_for_ui,
                 "Input tokens": in_tok if in_tok is not None else "-",
                 "Output tokens": out_tok if out_tok is not None else "-",
-                "Total tokens": (
-                    tot_tok if tot_tok is not None else (
-                        (in_tok or 0) + (out_tok or 0) if (in_tok is not None and out_tok is not None) else "-"
-                    )
-                ),
+                "Total tokens": (tot_tok if tot_tok is not None else (
+                    (in_tok or 0) + (out_tok or 0) if (in_tok is not None and out_tok is not None) else "-"
+                )),
                 "Time (s)": f"{duration_s:.2f}",
             })
 
             if ok:
-                st.success(f"✅ Execution finished — result received from {label_for_ui}.")
-                st.toast(f"Result received ({label_for_ui})", icon="✅")
+                st.success(f"✅ Execution finished — result received from {label_for_ui}."); st.toast(f"Result received ({label_for_ui})", icon="✅")
             else:
-                st.error(f"An error occurred with {label_for_ui}. See details in the footer.")
-                st.toast(f"Execution error ({label_for_ui})", icon="⚠️")
-
+                st.error(f"An error occurred with {label_for_ui}. See details in the footer."); st.toast(f"Execution error ({label_for_ui})", icon="⚠️")
         st.session_state.is_running = False
-
         dl_txt_placeholder.download_button(
             label="⬇️ Download Log (.txt)",
             data=st.session_state.exec_log,
@@ -319,106 +262,44 @@ if run_clicked:
 
 # ======= LLM Response (blue) =======
 st.markdown('<h3 class="blue-section">LLM Response</h3>', unsafe_allow_html=True)
-st.text_area(
-    "Output",
-    key="current_output",
-    height=220,
-    help="Only the latest run's response.",
-)
+st.text_area("Output", key="current_output", height=220, help="Only the latest run's response.")
 
-# ======= Table: Token usage (blue title) =======
+# ======= Token Usage (50% largura + visible rows = 5 com scroll) =======
 st.markdown('<h3 class="blue-section">Token Usage:</h3>', unsafe_allow_html=True)
+df_usage = pd.DataFrame(st.session_state["usage_rows"])
 
-def render_usage_table_component(rows):
-    """Render table com 14pt, cabeçalho com gridlines, zebra rows e bordas estilo Excel."""
-    rows = rows[-5:] if rows else []
-    def cell(v): return "-" if (v is None or v == "") else v
+if df_usage.empty:
+    st.info("No records yet")
+else:
+    # Coluna esquerda ocupa 50% da página:
+    col_usage, col_gap = st.columns([0.5, 0.5])
 
-    body_rows = "\n".join([
-        f"""
-        <tr class='row-{i % 2}'>
-          <td class='no'>{cell(r.get('No.'))}</td>
-          <td>{cell(r.get('Model'))}</td>
-          <td class='num'>{cell(r.get('Input tokens'))}</td>
-          <td class='num'>{cell(r.get('Output tokens'))}</td>
-          <td class='num'>{cell(r.get('Total tokens'))}</td>
-          <td class='num'>{cell(r.get('Time (s)'))}</td>
-        </tr>
-        """
-        for i, r in enumerate(rows)
-    ]) if rows else "<tr><td colspan='6' class='empty'>No records yet</td></tr>"
+    # Altura calculada para exibir exatamente ~5 linhas visíveis (com cabeçalho) e ativar scroll
+    VISIBLE_ROWS_USAGE = 5
+    ROW_PX_USAGE, HEADER_PX_USAGE, PADDING_PX_USAGE = 36, 40, 28
+    usage_editor_height = HEADER_PX_USAGE + VISIBLE_ROWS_USAGE * ROW_PX_USAGE + PADDING_PX_USAGE  # ~248px
 
-    html = f"""
-    <html>
-    <head>
-      <style>
-        .wrap {{
-          border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;
-          width: 100%;
-          max-height: 230px; display: grid; grid-template-rows: auto 1fr;
-          box-sizing: border-box;
-        }}
-        table {{
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 14pt;
-          box-sizing: border-box;
-        }}
-        thead tr {{
-          background: #ADD8E6;
-          color: #000;
-          font-weight: bold;
-        }}
-        th, td {{
-          padding: 8px;
-          border: 1px solid #d0d7de;
-          box-sizing: border-box;
-          font-size: 14pt;
-        }}
-        tbody {{
-          display: block;
-          overflow-y: auto;
-          max-height: 180px;
-        }}
-        thead, tbody tr {{
-          display: table;
-          width: 100%;
-          table-layout: fixed;
-        }}
-        thead tr th:nth-child(1), tbody tr td.no {{ width: 10%; text-align:right; }}
-        thead tr th:nth-child(2), tbody tr td:nth-child(2) {{ width: 25%; }}
+    with col_usage:
+        col_config = {
+            "No.": st.column_config.NumberColumn("No.", help="Sequence number", width="small", format="%d"),
+            "Model": st.column_config.TextColumn("Model", help="Model | Platform", width="large"),
+            "Input tokens": st.column_config.NumberColumn("Input tokens", help="Prompt tokens", format="%d"),
+            "Output tokens": st.column_config.NumberColumn("Output tokens", help="Completion tokens", format="%d"),
+            "Total tokens": st.column_config.NumberColumn("Total tokens", help="Sum of input + output", format="%d"),
+            "Time (s)": st.column_config.NumberColumn("Time (s)", help="Execution time in seconds", format="%.2f"),
+        }
+        column_order = ["No.", "Model", "Input tokens", "Output tokens", "Total tokens", "Time (s)"]
 
-        tbody tr.row-0 {{ background: #ffffff; }}
-        tbody tr.row-1 {{ background: #f2f8fc; }}
-
-        td.num {{ text-align: right; }}
-        td.empty {{ text-align:center; color:#666; padding:12px; }}
-      </style>
-    </head>
-    <body>
-      <div class="wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>No.</th>
-              <th>Model</th>
-              <th>Input tokens</th>
-              <th>Output tokens</th>
-              <th>Total tokens</th>
-              <th>Time (s)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {body_rows}
-          </tbody>
-        </table>
-      </div>
-    </body>
-    </html>
-    """
-    return html
-
-components.html(render_usage_table_component(st.session_state["usage_rows"]), height=280, scrolling=False)
+        st.data_editor(
+            df_usage,                     # mostra TODOS os registros,
+            hide_index=True,              # porém só 5 ficam visíveis
+            use_container_width=True,     # ocupa 100% da coluna (50% da página)
+            height=usage_editor_height,   # <<< limite visual: ~5 linhas → scroll para ver o resto
+            column_config=col_config,
+            column_order=column_order,
+            disabled=column_order,        # impede edição; mantém ordenação via menu do cabeçalho
+            key="usage_editor",
+        )
 
 # ======= Execution Log =======
 st.subheader("Execution Log")
@@ -433,9 +314,10 @@ st.text_area(
 # ======= Log PDF =======
 st.markdown("### Export Log as PDF")
 
-def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE) -> bytes:
+def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE, title_font_size: int = 20) -> bytes:
     """
     Gera um PDF com cabeçalho (logo + título) em TODAS as páginas e o conteúdo do log abaixo.
+    'title_font_size' torna o tamanho da fonte do título DINÂMICO.
     Inclui UMA LINHA EM BRANCO entre o cabeçalho e o conteúdo.
     """
     from reportlab.lib.pagesizes import A4
@@ -453,7 +335,6 @@ def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE) 
     bottom_margin = 20 * mm
 
     title_font_name = "Helvetica-Bold"
-    title_font_size = 20
     logo_height_mm  = 16
     header_gap_mm   = 3
     header_line_gap = 2
@@ -473,7 +354,7 @@ def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE) 
                 pass
 
         c.setFont(title_font_name, title_font_size)
-        c.setFillColorRGB(0.752, 0.0, 0.0)
+        c.setFillColorRGB(0.752, 0.0, 0.0)  # cor do título no PDF
         title_y = y_top - (logo_height_mm * mm * 0.65)
         c.drawCentredString(width / 2, title_y, title)
 
@@ -489,7 +370,6 @@ def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE) 
 
     max_chars_per_line = 110
     line_height = 12
-
     cursor_y = text_y - line_height  # 1 linha em branco
 
     def flush_page_and_new():
@@ -531,8 +411,13 @@ download_pdf_placeholder = colpdf2.empty()
 open_new_tab_placeholder = colpdf3.empty()
 
 if gen_pdf_clicked:
-    st.session_state["log_pdf_bytes"] = make_pdf_from_text(st.session_state["exec_log"], logo_b64, PDF_TITLE)
-    st.toast("PDF generated from log (with header and 1-line gap).", icon="📄")
+    st.session_state["log_pdf_bytes"] = make_pdf_from_text(
+        st.session_state["exec_log"],
+        logo_b64,
+        PDF_TITLE,
+        title_font_size=pdf_title_font_size  # usa o valor escolhido na sidebar
+    )
+    st.toast(f"PDF generated (title font size = {pdf_title_font_size}pt).", icon="📄")
 
 if st.session_state["log_pdf_bytes"]:
     download_pdf_placeholder.download_button(
@@ -550,9 +435,7 @@ if st.session_state["log_pdf_bytes"]:
                 const b64 = "{b64_pdf}";
                 const byteChars = atob(b64);
                 const byteNumbers = new Uint8Array(byteChars.length);
-                for (let i = 0; i < byteChars.length; i++) {{
-                    byteNumbers[i] = byteChars.charCodeAt(i);
-                }}
+                for (let i = 0; i < byteChars.length; i++) {{ byteNumbers[i] = byteChars.charCodeAt(i); }}
                 const blob = new Blob([byteNumbers], {{ type: "application/pdf" }});
                 const url = URL.createObjectURL(blob);
                 window.open(url, "_blank");
