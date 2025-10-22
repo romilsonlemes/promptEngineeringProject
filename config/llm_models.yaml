@@ -1,0 +1,90 @@
+# ===============================================
+# Dictionary with LLM models across different AI Platforms
+# ===============================================
+
+gpt-5:
+  Model: gpt-5
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+gpt-5-mini:
+  Model: gpt-5-mini
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+  
+gpt-4o:
+  Model: gpt-4o
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+gpt-4o-mini:
+  Model: gpt-4o-mini
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+gpt-4.1:
+  Model: gpt-4.1
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+gpt-4.1-mini:
+  Model: gpt-4.1-mini
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+gpt-3.5-turbo:
+  Model: gpt-3.5-turbo
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+text-davinci-003:
+  Model: text-davinci-003
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+o1:
+  Model: o1
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+o3-mini:
+  Model: o3-mini
+  Platform: OpenAI
+  Platform_API_KEY: OPENAI_API_KEY
+
+deepseek-chat:
+  Model: deepseek-chat
+  Platform: DeepSeek
+  Platform_API_KEY: DEEPSEEK_API_KEY
+
+deepseek-reasoner:
+  Model: deepseek-reasoner
+  Platform: DeepSeek
+  Platform_API_KEY: DEEPSEEK_API_KEY
+
+grok-2:
+  Model: grok-2
+  Platform: "xAI (Grok)"
+  Platform_API_KEY: XAI_API_KEY
+
+meta-llama3:
+  Model: meta-llama3
+  Platform: Meta AI
+  Platform_API_KEY: META_API_KEY
+
+claude-3-opus:
+  Model: claude-3-opus
+  Platform: Anthropic
+  Platform_API_KEY: ANTHROPIC_API_KEY
+
+gemini-1.5-pro:
+  Model: gemini-1.5-pro
+  Platform: Google Gemini
+  Platform_API_KEY: GOOGLE_API_KEY
+
+copilot-gpt-4:
+  Model: copilot-gpt-4
+  Platform: Microsoft Copilot
+  Platform_API_KEY: MICROSOFT_API_KEY
+
+  
