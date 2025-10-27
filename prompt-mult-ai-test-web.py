@@ -66,6 +66,11 @@ def _to_image_data_url(uploaded_file) -> Optional[str]:
     """Converte um arquivo carregado em data:image/...;base64,..."""
     if uploaded_file is None:
         return None
+    # IMPORTANT: move to beginning if file-like supports seek, then read once.
+    try:
+        uploaded_file.seek(0)
+    except Exception:
+        pass
     raw = uploaded_file.read()
     if not raw:
         return None
@@ -158,6 +163,10 @@ st.session_state.setdefault("last_error", "")
 st.session_state.setdefault("log_pdf_bytes", b"")
 st.session_state.setdefault("usage_rows", [])
 
+# *** MODIF: session_state para imagens (persistência entre interações)
+st.session_state.setdefault("image_data_urls", [])   # data URLs das imagens carregadas (uploads)
+st.session_state.setdefault("image_http_urls", [])   # URLs HTTP coladas
+
 # ================= Inputs (texto) =================
 default_q = "Analyze the image(s) and answer: what is this and what key details stand out?"
 st.markdown('<div class="prompt-label">Enter your question (prompt)</div>', unsafe_allow_html=True)
@@ -219,12 +228,32 @@ url_text = st.text_area(
     placeholder="https://example.com/image1.png\nhttps://example.com/image2.jpg"
 )
 
-# Pré-visualização de miniaturas
+# *** MODIF: processar uploads IMEDIATAMENTE e salvar data-URLs em session_state
+# Isso evita 'consumir' o uploaded_file e permite usar os data-URLs tanto para preview quanto para gerar o PDF.
 if up_files:
-    cols = st.columns(min(3, len(up_files)))
-    for i, uf in enumerate(up_files):
+    data_urls_preview = []
+    for uf in up_files[:6]:
+        du = _to_image_data_url(uf)
+        if du:
+            data_urls_preview.append(du)
+    st.session_state["image_data_urls"] = data_urls_preview
+else:
+    # Se não há uploads, limpa lista
+    st.session_state["image_data_urls"] = []
+
+# *** MODIF: processar texto de URLs HTTP e salvar
+if url_text and url_text.strip():
+    http_urls = [ln.strip() for ln in url_text.strip().splitlines() if ln.strip()]
+    st.session_state["image_http_urls"] = http_urls
+else:
+    st.session_state["image_http_urls"] = []
+
+# Pré-visualização de miniaturas (usando os data URLs guardados)
+if st.session_state["image_data_urls"]:
+    cols = st.columns(min(3, len(st.session_state["image_data_urls"])))
+    for i, du in enumerate(st.session_state["image_data_urls"]):
         with cols[i % len(cols)]:
-            st.image(uf, use_column_width=True, caption=f"Upload {i+1}", output_format="PNG")
+            st.image(du, use_column_width=True, caption=f"Upload {i+1}", output_format="PNG")
 
 # Conjunto de modelos com visão (pode ajustar conforme seu catálogo)
 vision_capable = {
@@ -252,6 +281,8 @@ if clear_clicked:
     st.session_state["last_error"] = ""
     st.session_state["log_pdf_bytes"] = b""
     st.session_state["usage_rows"] = []
+    st.session_state["image_data_urls"] = []
+    st.session_state["image_http_urls"] = []
     st.toast("Log cleared!", icon="🧹")
 
 if run_clicked:
@@ -262,17 +293,9 @@ if run_clicked:
     else:
         st.session_state.is_running = True
 
-        # Pré-prepara imagens/URLs uma vez (serão usadas apenas por modelos vision)
-        data_urls_master: List[str] = []
-        if up_files:
-            for uf in up_files[:6]:
-                du = _to_image_data_url(uf)
-                if du:
-                    data_urls_master.append(du)
-
-        http_urls_master: List[str] = []
-        if url_text.strip():
-            http_urls_master = [ln.strip() for ln in url_text.strip().splitlines() if ln.strip()]
+        # *** MODIF: usar imagens já convertidas e salvas em session_state
+        data_urls_master: List[str] = st.session_state.get("image_data_urls", []) or []
+        http_urls_master: List[str] = st.session_state.get("image_http_urls", []) or []
 
         for item in selected_models:
             model_id = item["Model"]
@@ -395,14 +418,22 @@ st.text_area(
     disabled=True,
 )
 
-# ================= Log PDF (mantido) =================
+# ================= Log PDF (alterado para incluir imagens) =================
 st.markdown("### Export Log as PDF")
 
-def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE, title_font_size: int = 20) -> bytes:
+def make_pdf_from_text(
+    text: str,
+    logo_b64: str | None,
+    image_data_urls: List[str] | None = None,
+    image_http_urls: List[str] | None = None,
+    title: str = PDF_TITLE,
+    title_font_size: int = 20
+) -> bytes:
     """
-    Gera um PDF com cabeçalho (logo + título) em TODAS as páginas e o conteúdo do log abaixo.
-    'title_font_size' torna o tamanho da fonte do título DINÂMICO.
-    Inclui UMA LINHA EM BRANCO entre o cabeçalho e o conteúdo.
+    Gera um PDF com cabeçalho (logo + título) em TODAS as páginas, inclui as imagens
+    carregadas (uploads) mantidas na mesma ordem, distribuindo até 3 por linha,
+    e depois o conteúdo do log.
+    Para URLs HTTP (se houver), os URLs são impressos como texto (não há download).
     """
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
@@ -452,34 +483,120 @@ def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE, 
     c.setFont("Helvetica", 10)
     c.setFillColorRGB(0, 0, 0)
 
+    # --- Inserir imagens (se houver) antes do texto do log ---
+    cursor_y = text_y - 10  # initial gap
+    max_img_height_mm = 50  # altura máxima por imagem em mm
+    gap_between_imgs_mm = 4
+
+    image_data_urls = image_data_urls or []
+    image_http_urls = image_http_urls or []
+
+    # função auxiliar para desenhar uma imagem data-url
+    def draw_data_image(data_url: str, x: float, y_top: float, max_w: float, max_h: float):
+        # data_url formato: data:<mime>;base64,<b64>
+        try:
+            if "," in data_url:
+                b64part = data_url.split(",", 1)[1]
+            else:
+                b64part = data_url
+            img_bytes = base64.b64decode(b64part)
+            img = ImageReader(io.BytesIO(img_bytes))
+            iw, ih = img.getSize()
+            # calcular escala
+            aspect = iw / ih if ih else 1.0
+            # ajustar largura e altura mantendo aspecto e limites
+            if (max_w / aspect) <= max_h:
+                w = max_w
+                h = max_w / aspect
+            else:
+                h = max_h
+                w = max_h * aspect
+            c.drawImage(img, x, y_top - h, width=w, height=h, mask='auto')
+            return w, h
+        except Exception:
+            # falha ao desenhar; retorna 0
+            return 0, 0
+
+    # layout: até 3 colunas
+    avail_width = width - left_margin - right_margin
+    cols = 3
+    gap_px = gap_between_imgs_mm * mm
+    img_w = (avail_width - (cols - 1) * gap_px) / cols
+    max_h = max_img_height_mm * mm
+
+    # desenhar imagens em linhas (data URLs)
+    if image_data_urls:
+        for i, du in enumerate(image_data_urls):
+            col_idx = i % cols
+            row_idx = i // cols
+            x = left_margin + col_idx * (img_w + gap_px)
+            # calcular y por row:
+            y_for_row = cursor_y - row_idx * (max_h + gap_px)
+            # se não couber na página, flush
+            if y_for_row - max_h < bottom_margin:
+                c.showPage()
+                cursor_y = draw_header()
+                y_for_row = cursor_y
+            w_drawn, h_drawn = draw_data_image(du, x, y_for_row, img_w, max_h)
+            # somente reduzir cursor_y ao final da linha:
+        # após último row, ajustar cursor_y para próxima linha abaixo das imagens
+        last_row = (len(image_data_urls) - 1) // cols
+        cursor_y = cursor_y - (last_row + 1) * (max_h + gap_px) + (gap_px / 2)
+
+    # Para URLs HTTP, apenas imprimir os links (pois não fazemos download)
+    if image_http_urls:
+        # Se imagens já foram desenhadas, pular uma linha
+        if image_data_urls:
+            cursor_y -= 12
+        c.setFont("Helvetica-Oblique", 9)
+        c.setFillColorRGB(0, 0, 0)
+        for url in image_http_urls:
+            if cursor_y - 12 < bottom_margin:
+                c.showPage()
+                cursor_y = draw_header()
+                c.setFont("Helvetica-Oblique", 9)
+            c.drawString(left_margin, cursor_y, f"Image URL: {url}")
+            cursor_y -= 12
+        c.setFont("Helvetica", 10)
+
+    # gap entre imagens/links e o texto do log
+    cursor_y -= 8
+
+    # --- Escreve o texto do log a partir de cursor_y ---
     max_chars_per_line = 110
     line_height = 12
-    cursor_y = text_y - line_height  # 1 linha em branco
-
-    def flush_page_and_new():
-        nonlocal cursor_y
+    # se cursor_y muito baixo, new page
+    if cursor_y - line_height < bottom_margin:
         c.showPage()
         cursor_y = draw_header()
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0, 0, 0)
-        cursor_y -= line_height
 
     for raw_line in text.splitlines():
         if raw_line == "":
             if cursor_y - line_height < bottom_margin:
-                flush_page_and_new()
+                c.showPage()
+                cursor_y = draw_header()
+                c.setFont("Helvetica", 10)
+                c.setFillColorRGB(0, 0, 0)
             cursor_y -= line_height
             continue
         line = raw_line
         while len(line) > max_chars_per_line:
             part = line[:max_chars_per_line]
             if cursor_y - line_height < bottom_margin:
-                flush_page_and_new()
+                c.showPage()
+                cursor_y = draw_header()
+                c.setFont("Helvetica", 10)
+                c.setFillColorRGB(0, 0, 0)
             c.drawString(left_margin, cursor_y, part)
             cursor_y -= line_height
             line = line[max_chars_per_line:]
         if cursor_y - line_height < bottom_margin:
-            flush_page_and_new()
+            c.showPage()
+            cursor_y = draw_header()
+            c.setFont("Helvetica", 10)
+            c.setFillColorRGB(0, 0, 0)
         c.drawString(left_margin, cursor_y, line)
         cursor_y -= line_height
 
@@ -490,6 +607,7 @@ def make_pdf_from_text(text: str, logo_b64: str | None, title: str = PDF_TITLE, 
     return pdf_bytes
 
 colpdf1, colpdf2, colpdf3 = st.columns([1.2, 1.2, 2])
+# *** MODIF: habilitar botão se houver log (mantido), mas também permitimos gerar mesmo sem run (imagens podem ter sido carregadas)
 gen_pdf_clicked = colpdf1.button("📄 Generate Log PDF", disabled=not bool(st.session_state.exec_log))
 download_pdf_placeholder = colpdf2.empty()
 open_new_tab_placeholder = colpdf3.empty()
@@ -498,7 +616,9 @@ if gen_pdf_clicked:
     st.session_state["log_pdf_bytes"] = make_pdf_from_text(
         st.session_state["exec_log"],
         logo_b64,
-        PDF_TITLE,
+        image_data_urls=st.session_state.get("image_data_urls", []),  # *** MODIF: passa imagens
+        image_http_urls=st.session_state.get("image_http_urls", []),  # *** MODIF: passa URLs
+        title=PDF_TITLE,
         title_font_size=pdf_title_font_size
     )
     st.toast(f"PDF generated (title font size = {pdf_title_font_size}pt).", icon="📄")
