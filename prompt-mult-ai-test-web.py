@@ -66,7 +66,6 @@ def _to_image_data_url(uploaded_file) -> Optional[str]:
     """Converte um arquivo carregado em data:image/...;base64,..."""
     if uploaded_file is None:
         return None
-    # IMPORTANT: move to beginning if file-like supports seek, then read once.
     try:
         uploaded_file.seek(0)
     except Exception:
@@ -126,6 +125,25 @@ st.markdown(
       [data-testid="stDataEditor"] thead * {{ font-weight: 700 !important; }}
 
       .thumb{{ border:1px solid #d0d7de; border-radius:8px; padding:4px; }}
+
+      /* Cabeçalho da seção de imagens */
+      .images-header {{
+        margin: 10px 0 6px 0;
+        padding: 8px 12px;
+        background: #eef6ff;
+        border: 1px solid #cfe5ff;
+        border-radius: 10px;
+        font-weight: 700;
+        color: #0b64d8;
+      }}
+
+      /* Rodapé de numeração da miniatura na UI */
+      .img-caption {{
+        text-align: center;
+        font-size: 12px;
+        color: #444;
+        margin-top: 4px;
+      }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -163,7 +181,7 @@ st.session_state.setdefault("last_error", "")
 st.session_state.setdefault("log_pdf_bytes", b"")
 st.session_state.setdefault("usage_rows", [])
 
-# *** MODIF: session_state para imagens (persistência entre interações)
+# Persistência de imagens
 st.session_state.setdefault("image_data_urls", [])   # data URLs das imagens carregadas (uploads)
 st.session_state.setdefault("image_http_urls", [])   # URLs HTTP coladas
 
@@ -213,8 +231,7 @@ with col_models:
 selected_rows = edited_df[edited_df["Select"]]
 selected_models = [{"Model": m, "Platform": p} for m, p in zip(selected_rows["Model"], selected_rows["Platform"])]
 
-# ================= (NOVO) Entrada de IMAGENS — uploads + URLs =================
-# Observação: inspirado no 1-zero-shot-test-web_v2.py
+# ================= Entrada de IMAGENS — uploads + URLs =================
 st.markdown('<h3 class="blue-section">Images:</h3>', unsafe_allow_html=True)
 up_files = st.file_uploader(
     "Upload 1–6 images (PNG/JPEG/WebP). They will be sent to the LLM.",
@@ -228,8 +245,7 @@ url_text = st.text_area(
     placeholder="https://example.com/image1.png\nhttps://example.com/image2.jpg"
 )
 
-# *** MODIF: processar uploads IMEDIATAMENTE e salvar data-URLs em session_state
-# Isso evita 'consumir' o uploaded_file e permite usar os data-URLs tanto para preview quanto para gerar o PDF.
+# Processar uploads e salvar data-URLs em session_state
 if up_files:
     data_urls_preview = []
     for uf in up_files[:6]:
@@ -238,24 +254,28 @@ if up_files:
             data_urls_preview.append(du)
     st.session_state["image_data_urls"] = data_urls_preview
 else:
-    # Se não há uploads, limpa lista
     st.session_state["image_data_urls"] = []
 
-# *** MODIF: processar texto de URLs HTTP e salvar
+# Processar texto de URLs HTTP e salvar
 if url_text and url_text.strip():
     http_urls = [ln.strip() for ln in url_text.strip().splitlines() if ln.strip()]
     st.session_state["image_http_urls"] = http_urls
 else:
     st.session_state["image_http_urls"] = []
 
-# Pré-visualização de miniaturas (usando os data URLs guardados)
+# ======= PRÉ-VISUALIZAÇÃO (com cabeçalho + rodapé numerado) =======
 if st.session_state["image_data_urls"]:
+    # Cabeçalho acima das imagens (solicitado)
+    st.markdown('<div class="images-header">🔎 This document presents an analysis of the images below:</div>', unsafe_allow_html=True)
+
     cols = st.columns(min(3, len(st.session_state["image_data_urls"])))
     for i, du in enumerate(st.session_state["image_data_urls"]):
         with cols[i % len(cols)]:
-            st.image(du, use_column_width=True, caption=f"Upload {i+1}", output_format="PNG")
+            st.image(du, use_column_width=True, caption=None, output_format="PNG")
+            # Rodapé numerado
+            st.markdown(f'<div class="img-caption">Image {i+1:02d}</div>', unsafe_allow_html=True)
 
-# Conjunto de modelos com visão (pode ajustar conforme seu catálogo)
+# Conjunto de modelos com visão
 vision_capable = {
     "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
     "gpt-5", "gpt-5-mini", "o3", "o3-mini"
@@ -293,7 +313,6 @@ if run_clicked:
     else:
         st.session_state.is_running = True
 
-        # *** MODIF: usar imagens já convertidas e salvas em session_state
         data_urls_master: List[str] = st.session_state.get("image_data_urls", []) or []
         http_urls_master: List[str] = st.session_state.get("image_http_urls", []) or []
 
@@ -301,7 +320,6 @@ if run_clicked:
             model_id = item["Model"]
             label_for_ui = f"{item['Model']} | {item['Platform']}"
 
-            # Decide se vai enviar multimodal (texto + imagens) ou apenas texto
             send_images = (model_id in vision_capable) and (data_urls_master or http_urls_master)
             if (not (model_id in vision_capable)) and (data_urls_master or http_urls_master):
                 st.info(f"ℹ️ {label_for_ui} pode não suportar visão. Somente o texto será enviado.", icon="ℹ️")
@@ -328,7 +346,6 @@ if run_clicked:
                 finished = datetime.now()
                 duration_s = (finished - started).total_seconds()
 
-            # Atualiza saída e log
             st.session_state["current_output"] = content
             sep = "\n" + ("-" * 80) + "\n"
             block = (
@@ -340,7 +357,6 @@ if run_clicked:
             )
             st.session_state["exec_log"] += (sep if st.session_state["exec_log"] else "") + block
 
-            # Tokens
             in_tok = out_tok = tot_tok = None
             if response is not None:
                 in_tok, out_tok, tot_tok = _extract_token_usage(response)
@@ -375,7 +391,7 @@ if run_clicked:
 st.markdown('<h3 class="blue-section">LLM Response</h3>', unsafe_allow_html=True)
 st.text_area("Output", key="current_output", height=220, help="Only the latest run's response.")
 
-# ================= Token Usage (50% largura + visible rows = 5 com scroll) =================
+# ================= Token Usage =================
 st.markdown('<h3 class="blue-section">Token Usage:</h3>', unsafe_allow_html=True)
 df_usage = pd.DataFrame(st.session_state["usage_rows"])
 
@@ -418,7 +434,7 @@ st.text_area(
     disabled=True,
 )
 
-# ================= Log PDF (alterado para incluir imagens) =================
+# ================= Log PDF (inclui imagens com cabeçalho + rodapé numerado) =================
 st.markdown("### Export Log as PDF")
 
 def make_pdf_from_text(
@@ -431,9 +447,11 @@ def make_pdf_from_text(
 ) -> bytes:
     """
     Gera um PDF com cabeçalho (logo + título) em TODAS as páginas, inclui as imagens
-    carregadas (uploads) mantidas na mesma ordem, distribuindo até 3 por linha,
-    e depois o conteúdo do log.
-    Para URLs HTTP (se houver), os URLs são impressos como texto (não há download).
+    carregadas (uploads) na mesma ordem (até 3 por linha) e adiciona:
+      - Cabeçalho ACIMA das imagens: "This document presents an analysis of the images below:"
+      - Rodapé abaixo de cada imagem: "Image 01", "Image 02", ...
+    Depois, inclui o texto do log.
+    URLs HTTP (se houver) são impressas como texto (não há download).
     """
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
@@ -479,73 +497,114 @@ def make_pdf_from_text(
         c.line(left_margin, line_y, width - right_margin, line_y)
         return line_y - (header_gap_mm * mm)
 
+    # Cabeçalho do documento
     text_y = draw_header()
     c.setFont("Helvetica", 10)
     c.setFillColorRGB(0, 0, 0)
 
-    # --- Inserir imagens (se houver) antes do texto do log ---
-    cursor_y = text_y - 10  # initial gap
-    max_img_height_mm = 50  # altura máxima por imagem em mm
-    gap_between_imgs_mm = 4
+    # --- Seção de imagens ---
+    cursor_y = text_y - 10  # espaço inicial
 
     image_data_urls = image_data_urls or []
     image_http_urls = image_http_urls or []
 
-    # função auxiliar para desenhar uma imagem data-url
-    def draw_data_image(data_url: str, x: float, y_top: float, max_w: float, max_h: float):
-        # data_url formato: data:<mime>;base64,<b64>
-        try:
-            if "," in data_url:
-                b64part = data_url.split(",", 1)[1]
-            else:
-                b64part = data_url
-            img_bytes = base64.b64decode(b64part)
-            img = ImageReader(io.BytesIO(img_bytes))
-            iw, ih = img.getSize()
-            # calcular escala
-            aspect = iw / ih if ih else 1.0
-            # ajustar largura e altura mantendo aspecto e limites
-            if (max_w / aspect) <= max_h:
-                w = max_w
-                h = max_w / aspect
-            else:
-                h = max_h
-                w = max_h * aspect
-            c.drawImage(img, x, y_top - h, width=w, height=h, mask='auto')
-            return w, h
-        except Exception:
-            # falha ao desenhar; retorna 0
-            return 0, 0
+    # Se houver imagens, escrever o cabeçalho acima delas (solicitado)
+    if image_data_urls:
+        c.setFont("Helvetica-Bold", 11)
+        c.setFillColorRGB(0.05, 0.39, 0.85)  # azul suave
+        header_text = "🔎 This document presents an analysis of the images below:"
+        c.drawString(left_margin, cursor_y, header_text)
+        cursor_y -= 12
+        c.setFont("Helvetica", 10)
+        c.setFillColorRGB(0, 0, 0)
 
-    # layout: até 3 colunas
+    # Parâmetros de layout das imagens
+    max_img_height_mm = 50          # altura máxima do retângulo do slot da imagem
+    gap_between_imgs_mm = 4
+    caption_gap_mm = 2              # espaço entre a imagem e o texto "Image NN"
+    caption_height_px = 10          # altura de uma linha de legenda (px lógicos do canvas)
+
+    from reportlab.lib.units import inch
     avail_width = width - left_margin - right_margin
     cols = 3
     gap_px = gap_between_imgs_mm * mm
     img_w = (avail_width - (cols - 1) * gap_px) / cols
     max_h = max_img_height_mm * mm
 
-    # desenhar imagens em linhas (data URLs)
+    def draw_data_image_with_caption(data_url: str, col_idx: int, row_idx: int, img_index: int):
+        """
+        Desenha a imagem dentro do slot (col_idx,row_idx) e a legenda "Image NN" logo abaixo.
+        Retorna a altura efetiva ocupada pela célula (max_h + alturas extras da legenda).
+        """
+        nonlocal cursor_y
+        x = left_margin + col_idx * (img_w + gap_px)
+        y_for_row_top = cursor_y - row_idx * (max_h + gap_px + caption_gap_mm * mm + caption_height_px)
+
+        # Nova página se não couber a célula inteira
+        if (y_for_row_top - max_h - caption_gap_mm * mm - caption_height_px) < bottom_margin:
+            c.showPage()
+            # Redesenha cabeçalho
+            new_text_y = draw_header()
+            c.setFont("Helvetica", 10)
+            c.setFillColorRGB(0, 0, 0)
+            # reposiciona o cursor e recomputa y_for_row_top para a primeira linha da nova página
+            cursor_y = new_text_y - 10
+            # Reimprime o cabeçalho de seção de imagens, pois ainda estamos na seção de imagens
+            c.setFont("Helvetica-Bold", 11)
+            c.setFillColorRGB(0.05, 0.39, 0.85)
+            c.drawString(left_margin, cursor_y, "🔎 This document presents an analysis of the images below:")
+            cursor_y -= 12
+            c.setFont("Helvetica", 10)
+            c.setFillColorRGB(0, 0, 0)
+            # recomputa para a nova página
+            y_for_row_top = cursor_y - row_idx * (max_h + gap_px + caption_gap_mm * mm + caption_height_px)
+
+        # Desenha a imagem (data-url)
+        try:
+            b64part = data_url.split(",", 1)[1] if "," in data_url else data_url
+            img_bytes = base64.b64decode(b64part)
+            from reportlab.lib.utils import ImageReader
+            img = ImageReader(io.BytesIO(img_bytes))
+            iw, ih = img.getSize()
+            aspect = iw / ih if ih else 1.0
+            if (img_w / aspect) <= max_h:
+                w = img_w
+                h = img_w / aspect
+            else:
+                h = max_h
+                w = max_h * aspect
+            c.drawImage(img, x, y_for_row_top - h, width=w, height=h, mask='auto')
+            # Centraliza a legenda sob a base da imagem
+            caption_y = (y_for_row_top - h) - (caption_gap_mm * mm)
+            caption_text = f"Image {img_index:02d}"
+            c.setFont("Helvetica", 9)
+            c.setFillColorRGB(0.26, 0.26, 0.26)
+            c.drawCentredString(x + w/2, caption_y - caption_height_px/2, caption_text)
+            # Volta à fonte padrão
+            c.setFont("Helvetica", 10)
+            c.setFillColorRGB(0, 0, 0)
+        except Exception:
+            # Se falhar, só imprime legenda no slot
+            caption_y = (y_for_row_top - max_h) - (caption_gap_mm * mm)
+            caption_text = f"Image {img_index:02d}"
+            c.setFont("Helvetica", 9)
+            c.setFillColorRGB(0.26, 0.26, 0.26)
+            c.drawCentredString(x + img_w/2, caption_y - caption_height_px/2, caption_text)
+            c.setFont("Helvetica", 10)
+            c.setFillColorRGB(0, 0, 0)
+
+    # Desenha imagens com legendas numeradas
     if image_data_urls:
         for i, du in enumerate(image_data_urls):
             col_idx = i % cols
             row_idx = i // cols
-            x = left_margin + col_idx * (img_w + gap_px)
-            # calcular y por row:
-            y_for_row = cursor_y - row_idx * (max_h + gap_px)
-            # se não couber na página, flush
-            if y_for_row - max_h < bottom_margin:
-                c.showPage()
-                cursor_y = draw_header()
-                y_for_row = cursor_y
-            w_drawn, h_drawn = draw_data_image(du, x, y_for_row, img_w, max_h)
-            # somente reduzir cursor_y ao final da linha:
-        # após último row, ajustar cursor_y para próxima linha abaixo das imagens
+            draw_data_image_with_caption(du, col_idx, row_idx, i + 1)
+        # Ajusta cursor_y ao final da última linha de imagens
         last_row = (len(image_data_urls) - 1) // cols
-        cursor_y = cursor_y - (last_row + 1) * (max_h + gap_px) + (gap_px / 2)
+        cursor_y = cursor_y - (last_row + 1) * (max_h + gap_px + caption_gap_mm * mm + caption_height_px) + (gap_px / 2)
 
-    # Para URLs HTTP, apenas imprimir os links (pois não fazemos download)
+    # URLs HTTP impressas como texto
     if image_http_urls:
-        # Se imagens já foram desenhadas, pular uma linha
         if image_data_urls:
             cursor_y -= 12
         c.setFont("Helvetica-Oblique", 9)
@@ -554,23 +613,30 @@ def make_pdf_from_text(
             if cursor_y - 12 < bottom_margin:
                 c.showPage()
                 cursor_y = draw_header()
-                c.setFont("Helvetica-Oblique", 9)
+                c.setFont("Helvetica", 10); c.setFillColorRGB(0, 0, 0)
+                # como voltamos do showPage, reabre seção imagens (texto)
+                c.setFont("Helvetica-Bold", 11)
+                c.setFillColorRGB(0.05, 0.39, 0.85)
+                c.drawString(left_margin, cursor_y - 10, "🔎 This document presents an analysis of the images below:")
+                cursor_y -= 22
+                c.setFont("Helvetica-Oblique", 9); c.setFillColorRGB(0, 0, 0)
             c.drawString(left_margin, cursor_y, f"Image URL: {url}")
             cursor_y -= 12
         c.setFont("Helvetica", 10)
+        c.setFillColorRGB(0, 0, 0)
 
-    # gap entre imagens/links e o texto do log
+    # gap entre seção de imagens e texto do log
     cursor_y -= 8
 
-    # --- Escreve o texto do log a partir de cursor_y ---
-    max_chars_per_line = 110
-    line_height = 12
-    # se cursor_y muito baixo, new page
-    if cursor_y - line_height < bottom_margin:
+    # --- Texto do log ---
+    if cursor_y - 12 < bottom_margin:
         c.showPage()
         cursor_y = draw_header()
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0, 0, 0)
+
+    max_chars_per_line = 110
+    line_height = 12
 
     for raw_line in text.splitlines():
         if raw_line == "":
@@ -607,7 +673,6 @@ def make_pdf_from_text(
     return pdf_bytes
 
 colpdf1, colpdf2, colpdf3 = st.columns([1.2, 1.2, 2])
-# *** MODIF: habilitar botão se houver log (mantido), mas também permitimos gerar mesmo sem run (imagens podem ter sido carregadas)
 gen_pdf_clicked = colpdf1.button("📄 Generate Log PDF", disabled=not bool(st.session_state.exec_log))
 download_pdf_placeholder = colpdf2.empty()
 open_new_tab_placeholder = colpdf3.empty()
@@ -616,8 +681,8 @@ if gen_pdf_clicked:
     st.session_state["log_pdf_bytes"] = make_pdf_from_text(
         st.session_state["exec_log"],
         logo_b64,
-        image_data_urls=st.session_state.get("image_data_urls", []),  # *** MODIF: passa imagens
-        image_http_urls=st.session_state.get("image_http_urls", []),  # *** MODIF: passa URLs
+        image_data_urls=st.session_state.get("image_data_urls", []),
+        image_http_urls=st.session_state.get("image_http_urls", []),
         title=PDF_TITLE,
         title_font_size=pdf_title_font_size
     )
@@ -660,7 +725,7 @@ if st.session_state["last_error"]:
         disabled=True,
     )
 
-# ===================== OpenAI Footer (adicionado a partir de 1-zero-shot-test-web.py) =====================
+# ===================== OpenAI Footer =====================
 st.markdown(
     """
     <style>
